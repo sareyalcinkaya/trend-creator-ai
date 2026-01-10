@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Sparkles, RefreshCw, Loader2 } from 'lucide-react';
 import HeroSection from '@/components/HeroSection';
@@ -6,43 +6,44 @@ import PlatformSelector from '@/components/PlatformSelector';
 import TrendCard from '@/components/TrendCard';
 import PersonalitySelector from '@/components/PersonalitySelector';
 import GeneratedPostCard from '@/components/GeneratedPostCard';
-import { mockTrends, Platform, Trend, GeneratedPost } from '@/lib/constants';
+import { Platform, Trend } from '@/lib/constants';
+import { useTrends } from '@/hooks/useTrends';
+import { usePostGeneration } from '@/hooks/usePostGeneration';
 
 const Index = () => {
   const [selectedPlatforms, setSelectedPlatforms] = useState<Platform[]>(['linkedin', 'twitter']);
   const [selectedTrend, setSelectedTrend] = useState<Trend | null>(null);
   const [personality, setPersonality] = useState<string | null>('professional');
   const [additionalContext, setAdditionalContext] = useState('');
-  const [generatedPosts, setGeneratedPosts] = useState<GeneratedPost[]>([]);
-  const [isGenerating, setIsGenerating] = useState(false);
+  
+  const { trends, isLoading: isTrendsLoading, fetchTrends } = useTrends();
+  const { generatedPosts, isGenerating, generatePosts } = usePostGeneration();
+  
+  // Fetch trends on initial load and when platforms change
+  useEffect(() => {
+    fetchTrends(selectedPlatforms);
+  }, []);
   
   const handlePlatformToggle = (platform: Platform) => {
-    setSelectedPlatforms(prev => 
-      prev.includes(platform) 
+    setSelectedPlatforms(prev => {
+      const newPlatforms = prev.includes(platform) 
         ? prev.filter(p => p !== platform)
-        : [...prev, platform]
-    );
+        : [...prev, platform];
+      return newPlatforms;
+    });
+    setSelectedTrend(null);
   };
   
-  const filteredTrends = mockTrends.filter(t => selectedPlatforms.includes(t.platform));
+  const filteredTrends = trends.filter(t => selectedPlatforms.includes(t.platform));
+  
+  const handleRefreshTrends = () => {
+    fetchTrends(selectedPlatforms);
+    setSelectedTrend(null);
+  };
   
   const handleGenerate = async () => {
     if (!selectedTrend || !personality) return;
-    
-    setIsGenerating(true);
-    
-    // Simulate AI generation delay
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    const mockPosts: GeneratedPost[] = selectedPlatforms.map(platform => ({
-      platform,
-      content: getContentForPlatform(platform, selectedTrend, personality),
-      hashtags: [selectedTrend.hashtag, '#Innovation', '#Future'],
-      estimatedReach: `${Math.floor(Math.random() * 50 + 10)}K`,
-    }));
-    
-    setGeneratedPosts(mockPosts);
-    setIsGenerating(false);
+    await generatePosts(selectedTrend, personality, selectedPlatforms, additionalContext);
   };
   
   return (
@@ -64,32 +65,66 @@ const Index = () => {
               What's <span className="gradient-text">Trending</span> Now
             </h2>
             <p className="text-muted-foreground text-lg max-w-2xl mx-auto">
-              Real-time trends across your favorite platforms. Click on a trend to generate personalized content.
+              AI-powered trends across your favorite platforms. Click on a trend to generate personalized content.
             </p>
           </motion.div>
           
-          <div className="mb-10">
+          <div className="mb-10 flex flex-col items-center gap-4">
             <PlatformSelector 
               selected={selectedPlatforms} 
               onToggle={handlePlatformToggle} 
             />
+            <button
+              onClick={handleRefreshTrends}
+              disabled={isTrendsLoading || selectedPlatforms.length === 0}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-card border border-border text-sm font-medium hover:bg-accent/10 transition-colors disabled:opacity-50"
+            >
+              {isTrendsLoading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Fetching Trends...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="w-4 h-4" />
+                  Refresh Trends
+                </>
+              )}
+            </button>
           </div>
           
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
             <AnimatePresence mode="popLayout">
-              {filteredTrends.map((trend, index) => (
-                <TrendCard
-                  key={trend.id}
-                  trend={trend}
-                  index={index}
-                  onSelect={setSelectedTrend}
-                  isSelected={selectedTrend?.id === trend.id}
-                />
-              ))}
+              {isTrendsLoading ? (
+                // Loading skeleton
+                [...Array(6)].map((_, i) => (
+                  <motion.div
+                    key={`skeleton-${i}`}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="glass-card p-6 rounded-2xl animate-pulse"
+                  >
+                    <div className="h-4 bg-muted rounded w-24 mb-4" />
+                    <div className="h-6 bg-muted rounded w-3/4 mb-2" />
+                    <div className="h-4 bg-muted rounded w-1/2" />
+                  </motion.div>
+                ))
+              ) : (
+                filteredTrends.map((trend, index) => (
+                  <TrendCard
+                    key={trend.id}
+                    trend={trend}
+                    index={index}
+                    onSelect={setSelectedTrend}
+                    isSelected={selectedTrend?.id === trend.id}
+                  />
+                ))
+              )}
             </AnimatePresence>
           </div>
           
-          {filteredTrends.length === 0 && (
+          {!isTrendsLoading && filteredTrends.length === 0 && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -159,7 +194,7 @@ const Index = () => {
                 {isGenerating ? (
                   <>
                     <Loader2 className="w-5 h-5 animate-spin" />
-                    Generating...
+                    Generating with AI...
                   </>
                 ) : generatedPosts.length > 0 ? (
                   <>
@@ -198,44 +233,12 @@ const Index = () => {
       <footer className="py-12 border-t border-border">
         <div className="container mx-auto px-6 text-center">
           <p className="text-muted-foreground">
-            Built with AI to amplify your voice across social media.
+            Powered by AI to amplify your voice across social media.
           </p>
         </div>
       </footer>
     </div>
   );
 };
-
-// Helper function to generate mock content
-function getContentForPlatform(platform: Platform, trend: Trend, personality: string): string {
-  const contents: Record<string, Record<Platform, string>> = {
-    professional: {
-      linkedin: `The rise of ${trend.title} is reshaping how we think about business.\n\nHere's what forward-thinking leaders need to know:\n\n1. Early adopters are seeing 3x faster results\n2. The integration challenges are real—but solvable\n3. The ROI potential is undeniable\n\nI've been diving deep into this space, and the opportunities are immense for those willing to adapt.`,
-      twitter: `${trend.title} is having a moment—and for good reason.\n\nThe companies paying attention now will be the ones leading in 2025.\n\nHere's my take on why this matters 🧵`,
-      threads: `Something interesting about ${trend.title}...\n\nI've noticed more conversations shifting toward this in my circles. The momentum is real.\n\nWhat's your experience been?`,
-      bluesky: `The ${trend.title} wave is here.\n\nI'm genuinely excited about the implications for creative work and collaboration.\n\nAnyone else exploring this space? Would love to connect.`,
-    },
-    witty: {
-      linkedin: `Everyone's talking about ${trend.title} like it's the new sliced bread.\n\nPlot twist: It might actually be better than sliced bread. 🍞\n\nHere's why I'm cautiously optimistic (and yes, I'm aware of the irony of posting about it on LinkedIn):`,
-      twitter: `${trend.title} is trending and honestly? I'm here for the chaos.\n\nRemember when we thought [previous trend] was peak? Sweet summer child vibes. 😅`,
-      threads: `Hot take: ${trend.title} is either the future or the most elaborate group project procrastination ever.\n\nNo middle ground. Pick your side.`,
-      bluesky: `Joined the ${trend.title} conversation and my take is: ✨vibes✨\n\n(But also, there's actually some substance here if you look past the hype)`,
-    },
-    inspirational: {
-      linkedin: `${trend.title} reminds us of something powerful:\n\nChange isn't coming—it's here.\n\nThe question isn't whether to adapt. It's whether you'll lead the change or follow it.\n\nEvery breakthrough starts with someone who saw possibility where others saw uncertainty.`,
-      twitter: `${trend.title} is more than a trend.\n\nIt's a reminder that the future belongs to those bold enough to build it. ✨\n\nWhat will you create?`,
-      threads: `There's something beautiful about moments like ${trend.title}.\n\nWe're all figuring it out together. And that's exactly where magic happens.`,
-      bluesky: `${trend.title} represents what I love most about our collective creativity.\n\nWe keep finding new ways to connect, create, and evolve. That's worth celebrating.`,
-    },
-    direct: {
-      linkedin: `${trend.title}. Let's cut through the noise.\n\nWhat it is: A fundamental shift in how we approach [topic].\nWhat it isn't: A silver bullet.\n\nThe reality? Those who move fast will win. Those who wait will catch up—maybe.`,
-      twitter: `${trend.title}:\n\n✓ Real opportunity\n✗ Overhyped BS\n✓ Worth your attention\n✗ Worth your panic\n\nSimple as that.`,
-      threads: `Everyone's overcomplicating ${trend.title}.\n\nThe core insight: [Thing] is changing. Adapt or don't. But don't pretend you weren't warned.`,
-      bluesky: `${trend.title} in plain English:\n\nDo this → Get results.\nIgnore this → Get left behind.\n\nQuestions? DM me.`,
-    },
-  };
-  
-  return contents[personality]?.[platform] || contents.professional[platform];
-}
 
 export default Index;
